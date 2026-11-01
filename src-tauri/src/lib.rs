@@ -46,13 +46,16 @@ struct Shared {
     quitting: AtomicBool,
     /// Started with --minimized: the first window stays hidden in the tray until it is opened.
     start_hidden: AtomicBool,
+    /// The other servers of the group the chosen server belongs to (its mirrors), so a window may move to one that has taken over.
+    group: Mutex<Vec<Url>>,
 }
 
 /// Browser flags for every window. The page is the person's own Ember server, so a call may use the microphone and camera without the
 /// webview asking: its permission prompt does not show in these windows, and the question waiting unanswered left the call silent. Every window
-/// has to use the same flags because they share one profile.
+/// has to use the same flags because they share one profile. Sound may also start without a click: a call joined from a notice has had none,
+/// and the webview then keeps the other person silent.
 #[cfg(windows)]
-const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream";
+const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required";
 
 const THIN_WIDTH: f64 = 400.0;
 const THIN_HEIGHT: f64 = 780.0;
@@ -220,7 +223,8 @@ fn nav_guard(app: AppHandle) -> impl Fn(&Url) -> bool + Send + Sync + 'static {
     move |url| {
         // Whichever server is chosen now (it can be changed while the window is open).
         let current = app.state::<Shared>().settings.lock().unwrap().server.clone().and_then(|s| Url::parse(&s).ok());
-        if is_local(url) || current.map(|c| same_origin(url, &c)).unwrap_or(false) || matches!(url.scheme(), "about" | "blob" | "data") {
+        let in_group = app.state::<Shared>().group.lock().unwrap().iter().any(|g| same_origin(url, g));
+        if is_local(url) || in_group || current.map(|c| same_origin(url, &c)).unwrap_or(false) || matches!(url.scheme(), "about" | "blob" | "data") {
             return true;
         }
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
@@ -296,6 +300,13 @@ fn close_chat_windows(app: AppHandle) -> Vec<String> {
         let _ = w.close();
     }
     open
+}
+
+/// The page tells which servers belong to the group of the chosen one, so windows may move to a mirror that has taken over and back.
+#[tauri::command]
+fn allow_servers(app: AppHandle, urls: Vec<String>) {
+    let parsed: Vec<Url> = urls.iter().filter_map(|u| Url::parse(u).ok()).filter(|u| matches!(u.scheme(), "http" | "https")).take(16).collect();
+    *app.state::<Shared>().group.lock().unwrap() = parsed;
 }
 
 /// A nudge shakes the window the chat is in (the chat's own window, else the main one) side to side and back. The window is put back where it was.
@@ -564,7 +575,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, shake_chat, close_chat_windows, set_window_layout, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, allow_servers, shake_chat, close_chat_windows, set_window_layout, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
@@ -577,7 +588,7 @@ pub fn run() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
-            app.manage(Shared { settings: Mutex::new(load_settings(&handle)), quitting: AtomicBool::new(false), start_hidden: AtomicBool::new(false) });
+            app.manage(Shared { settings: Mutex::new(load_settings(&handle)), quitting: AtomicBool::new(false), start_hidden: AtomicBool::new(false), group: Mutex::new(Vec::new()) });
             build_tray(&handle)?;
             let minimized = std::env::args().any(|a| a == "--minimized");
             let server = saved_server(&handle);
