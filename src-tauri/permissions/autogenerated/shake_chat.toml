@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shake-chat"
+description = "Enables the shake_chat command without any pre-configured scope."
+commands.allow = ["shake_chat"]
+
+[[permission]]
+identifier = "deny-shake-chat"
+description = "Denies the shake_chat command without any pre-configured scope."
+commands.deny = ["shake_chat"]

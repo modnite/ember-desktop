@@ -2,6 +2,11 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.4.1
+
+- A nudge shakes the window the chat is in, sent or received. It is the real window that shakes, and the system's reduced motion setting does not switch it off.
+- Switching Chats in their own windows off closes the chat windows and brings their chats into the one window (the one in use is shown). Switching it on pops the chat you were in out into a window of its own.
+
 ## 0.4.0
 
 - The window is thin. The sign-in page and the chat list (when chats have windows of their own) open at phone width, and the empty "Pick a chat" pane is gone in that mode. Switching Chats in their own windows off makes the window wide again.

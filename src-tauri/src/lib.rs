@@ -269,6 +269,44 @@ fn reveal(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
+/// Chats stop having windows of their own: close every chat window and say which chats were open, the one used last first, so the main window can show them.
+#[tauri::command]
+fn close_chat_windows(app: AppHandle) -> Vec<String> {
+    let mut open = Vec::new();
+    for (label, w) in app.webview_windows() {
+        if !label.starts_with("chat-") {
+            continue;
+        }
+        if let Some(id) = w.url().ok().and_then(|u| u.fragment().and_then(|f| f.strip_prefix("/chat/").map(str::to_string))) {
+            if w.is_focused().unwrap_or(false) {
+                open.insert(0, id);
+            } else {
+                open.push(id);
+            }
+        }
+        let _ = w.close();
+    }
+    open
+}
+
+/// A nudge shakes the window the chat is in (the chat's own window, else the main one) side to side and back. The window is put back where it was.
+#[tauri::command]
+fn shake_chat(app: AppHandle, room_id: String) {
+    let id: String = room_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    let Some(w) = app.get_webview_window(&format!("chat-{id}")).or_else(|| app.get_webview_window(MAIN)) else { return };
+    if !w.is_visible().unwrap_or(false) || w.is_minimized().unwrap_or(false) || w.is_maximized().unwrap_or(false) || w.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    let Ok(home) = w.outer_position() else { return };
+    let scale = w.scale_factor().unwrap_or(1.0);
+    std::thread::spawn(move || {
+        for dx in [-14.0, 12.0, -10.0, 9.0, -6.0, 4.0, -2.0, 0.0] {
+            let _ = w.set_position(PhysicalPosition::new(home.x as f64 + dx * scale, home.y as f64));
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    });
+}
+
 /// The page has drawn itself: show its window.
 #[tauri::command]
 fn window_ready(app: AppHandle, window: tauri::WebviewWindow) {
@@ -514,7 +552,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, set_window_layout, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, shake_chat, close_chat_windows, set_window_layout, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
