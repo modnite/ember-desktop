@@ -19,6 +19,7 @@
   input:focus { outline: 2px solid var(--primary); border-color: var(--primary); }
   button { width: 100%; height: 52px; margin-top: 16px; border: 0; border-radius: 26px; background: var(--primary); color: var(--on-primary); font: 600 16px "Segoe UI", system-ui, sans-serif; cursor: pointer; }
   button[disabled] { opacity: 0.55; cursor: default; }
+  button.text { background: none; color: var(--primary); height: 44px; margin-top: 8px; }
   .error { color: var(--error); margin: 12px 0 0; min-height: 1.4em; font-size: 14px; }
 </style>
 </head>
@@ -32,6 +33,7 @@
     <input id="server" type="text" placeholder="ember.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
     <p class="error" id="error" role="alert"></p>
     <button id="go" type="submit">Connect</button>
+    <button id="cancel" class="text" type="button" hidden>Cancel</button>
   </form>
 </main>
 <script>
@@ -39,7 +41,10 @@
   const input = document.getElementById('server');
   const error = document.getElementById('error');
   const go = document.getElementById('go');
-  invoke('get_server').then((s) => { if (s) input.value = s.replace(/^https:\/\//, ''); }).catch(() => {});
+  const cancel = document.getElementById('cancel');
+  // With a server already chosen this page was opened to change it, so there is a way back.
+  invoke('get_server').then((s) => { if (s) { input.value = s.replace(/^https:\/\//, ''); cancel.hidden = false; } }).catch(() => {});
+  cancel.addEventListener('click', () => { invoke('return_to_server').catch(() => {}); });
   document.getElementById('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     error.textContent = '';

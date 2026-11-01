@@ -2,6 +2,15 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.2.2
+
+- Change server no longer opens a second window. The page for choosing a server replaces the web app inside the one window, with the current server filled in and a Cancel link to go back. The first run uses the same page.
+
+## 0.2.1
+
+- The same server address as Android works: type `call.example.com` and the app finds the Ember web app next to it (`ember.example.com`) and uses it, but only when that address really is the Ember web app. If neither answers as Ember, the message says what was tried.
+- A debug build can run beside an installed copy.
+
 ## 0.2.0
 
 - The app icon is the speech bubble and flame on their own, with no tile or box around it. The tray icon is the same.

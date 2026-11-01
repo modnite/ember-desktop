@@ -22,7 +22,6 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 const MAIN: &str = "main";
-const SETUP: &str = "setup";
 
 /// What the shell remembers between runs.
 #[derive(Serialize, Deserialize, Clone)]
@@ -127,6 +126,24 @@ fn probe(origin: &str) -> Probe {
     if ember { Probe::Ok } else { Probe::NoEmber }
 }
 
+/// Where the Ember web app usually lives next to a server's own address: call.example.com becomes ember.example.com, example.com becomes
+/// ember.example.com. Nothing for an IP address or a name with no dot.
+fn ember_sibling(origin: &str) -> Option<String> {
+    let mut url = Url::parse(origin).ok()?;
+    let host = url.host_str()?.to_string();
+    if host.parse::<std::net::IpAddr>().is_ok() || !host.contains('.') {
+        return None;
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    let rest = if labels.len() >= 3 { labels[1..].join(".") } else { host.clone() };
+    let sibling = format!("ember.{rest}");
+    if sibling == host {
+        return None;
+    }
+    url.set_host(Some(&sibling)).ok()?;
+    Some(url.origin().ascii_serialization())
+}
+
 fn resolve_server(input: &str) -> Result<String, String> {
     let options = candidates(input);
     if options.is_empty() {
@@ -142,11 +159,23 @@ fn resolve_server(input: &str) -> Result<String, String> {
             worst = found;
         }
     }
+    // The same address Android uses is often the Hearth server's own (call.example.com), where the Ember web app lives under a name of its
+    // own. Try that name, and only take it if it really is the Ember web app.
+    let mut tried = None;
+    if worst >= Probe::NoEmber || worst == Probe::Unreachable {
+        if let Some(sibling) = options.iter().find_map(|o| ember_sibling(o)) {
+            if probe(&sibling) == Probe::Ok {
+                return Ok(sibling);
+            }
+            tried = Some(sibling);
+        }
+    }
     let host = Url::parse(&options[0]).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| input.trim().to_string());
+    let also = tried.and_then(|t| Url::parse(&t).ok()).and_then(|u| u.host_str().map(str::to_string)).map(|h| format!(" {h} did not answer as the Ember web app either.")).unwrap_or_default();
     Err(match worst {
-        Probe::NoEmber => format!("{host} is a Hearth server, but it does not offer the Ember web app. Ember usually has its own address, for example ember.yourdomain.com."),
+        Probe::NoEmber => format!("{host} is a Hearth server, but it does not offer the Ember web app.{also} Ember usually has its own address, for example ember.yourdomain.com."),
         Probe::NotHearth => format!("{host} answered, but it is not a Hearth server."),
-        _ => format!("Could not reach {host}. Check the address and your connection. A name that only resolves inside your home network will not answer from elsewhere, and the other way round."),
+        _ => format!("Could not reach {host}.{also} Check the address and your connection."),
     })
 }
 
@@ -154,12 +183,29 @@ fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme() && a.host_str() == b.host_str() && a.port_or_known_default() == b.port_or_known_default()
 }
 
-/// The window with the web app. It may only show the person's own server: any other address opens in the default browser instead.
-fn build_main(app: &AppHandle, server: &str, visible: bool) -> tauri::Result<WebviewWindow> {
-    let home = Url::parse(server).expect("a saved server address is a valid address");
+/// The shell's own page, where the server address is typed. It is shown in the one window, in place of the web app.
+fn local_page() -> Url {
+    #[cfg(windows)]
+    let text = "http://tauri.localhost/index.html";
+    #[cfg(not(windows))]
+    let text = "tauri://localhost/index.html";
+    Url::parse(text).expect("the shell's own page has a valid address")
+}
+
+fn is_local(url: &Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
+/// The one window. It shows the person's own server (or the shell's page for choosing one) and nothing else: any other address opens in
+/// the default browser instead.
+fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Result<WebviewWindow> {
+    let start = match server {
+        Some(s) => WebviewUrl::External(Url::parse(s).expect("a saved server address is a valid address")),
+        None => WebviewUrl::App("index.html".into()),
+    };
     let guard_app = app.clone();
     let popup_app = app.clone();
-    WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(home))
+    WebviewWindowBuilder::new(app, MAIN, start)
         .title("Ember")
         .inner_size(1100.0, 760.0)
         .min_inner_size(380.0, 480.0)
@@ -167,7 +213,7 @@ fn build_main(app: &AppHandle, server: &str, visible: bool) -> tauri::Result<Web
         .on_navigation(move |url| {
             // Whichever server is chosen now (it can be changed while the window is open).
             let current = guard_app.state::<Shared>().settings.lock().unwrap().server.clone().and_then(|s| Url::parse(&s).ok());
-            if current.map(|c| same_origin(url, &c)).unwrap_or(false) || url.scheme() == "about" || url.scheme() == "blob" || url.scheme() == "data" {
+            if is_local(url) || current.map(|c| same_origin(url, &c)).unwrap_or(false) || matches!(url.scheme(), "about" | "blob" | "data") {
                 return true;
             }
             let _ = guard_app.opener().open_url(url.as_str(), None::<&str>);
@@ -180,32 +226,31 @@ fn build_main(app: &AppHandle, server: &str, visible: bool) -> tauri::Result<Web
         .build()
 }
 
+fn saved_server(app: &AppHandle) -> Option<String> {
+    app.state::<Shared>().settings.lock().unwrap().server.clone()
+}
+
 fn show_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
-    } else if let Some(w) = app.get_webview_window(SETUP) {
-        let _ = w.show();
-        let _ = w.set_focus();
     } else {
-        open_setup(app);
+        let server = saved_server(app);
+        let _ = build_main(app, server.as_deref(), true);
     }
 }
 
-/// The page where the server address is typed, in a small window of its own.
+/// Show the page for choosing a server in the main window, in place of the web app.
 fn open_setup(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(SETUP) {
+    if let Some(w) = app.get_webview_window(MAIN) {
+        let _ = w.navigate(local_page());
         let _ = w.show();
+        let _ = w.unminimize();
         let _ = w.set_focus();
-        return;
+    } else {
+        let _ = build_main(app, None, true);
     }
-    let _ = WebviewWindowBuilder::new(app, SETUP, WebviewUrl::App("index.html".into()))
-        .title("Ember")
-        .inner_size(460.0, 600.0)
-        .resizable(false)
-        .center()
-        .build();
 }
 
 // ---------------------------------------------------------------- what the pages can ask for
@@ -222,12 +267,19 @@ async fn set_server(app: AppHandle, input: String) -> Result<String, String> {
         let _ = main.show();
         let _ = main.set_focus();
     } else {
-        build_main(&app, &origin, true).map_err(|e| e.to_string())?;
-    }
-    if let Some(setup) = app.get_webview_window(SETUP) {
-        let _ = setup.close();
+        build_main(&app, Some(&origin), true).map_err(|e| e.to_string())?;
     }
     Ok(origin)
+}
+
+/// Leave the page for choosing a server and go back to the one already chosen.
+#[tauri::command]
+fn return_to_server(app: AppHandle) {
+    if let (Some(main), Some(server)) = (app.get_webview_window(MAIN), saved_server(&app)) {
+        if let Ok(url) = Url::parse(&server) {
+            let _ = main.navigate(url);
+        }
+    }
 }
 
 /// The web app's own "Change server" button: opens the page where the address is typed.
@@ -330,13 +382,15 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        // A second copy only brings the first one to the front.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
+    let builder = tauri::Builder::default();
+    // A second copy only brings the first one to the front. (Not in a debug build, so one can be tried beside an installed copy.)
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)));
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, open_server_picker, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
@@ -352,13 +406,9 @@ pub fn run() {
             app.manage(Shared { settings: Mutex::new(load_settings(&handle)), quitting: AtomicBool::new(false) });
             build_tray(&handle)?;
             let minimized = std::env::args().any(|a| a == "--minimized");
-            let server = handle.state::<Shared>().settings.lock().unwrap().server.clone();
-            match server {
-                Some(s) => {
-                    build_main(&handle, &s, !minimized)?;
-                }
-                None => open_setup(&handle),
-            }
+            let server = saved_server(&handle);
+            // Starting minimized only hides the window when there is a server to show; the first run needs the page for choosing one.
+            build_main(&handle, server.as_deref(), !minimized || server.is_none())?;
             Ok(())
         })
         .run(tauri::generate_context!())

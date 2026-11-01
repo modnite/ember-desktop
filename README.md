@@ -18,7 +18,7 @@ Windows needs Windows 10 or later (the shell uses Microsoft's WebView2). Older s
 
 Type your server's address (`ember.example.com`; a bare address tries https, then http). The shell checks that a Hearth server answers, remembers it and opens it. Change server does it again: in Settings (Server), on the sign-in page, or in the tray menu.
 
-Use the address of the **Ember web app** (for example `ember.example.com`), not the Hearth web address (`call.example.com`). The shell opens that address as a page, so it has to be the one that serves Ember. Android only talks to the server's API, which is why either address works there.
+You can type the same address Android uses (for example `call.example.com`). The shell opens an address as a page, so it needs the one that serves the Ember web app: if the address you typed is a Hearth server without Ember, the shell tries `ember.` plus the rest of the name (`ember.example.com`) and uses it only if it answers as the Ember web app.
 
 Settings are in `%APPDATA%\org.hearth.ember.desktop\settings.json` (the matching folder on macOS and Linux).
 
