@@ -2,6 +2,11 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.3.0
+
+- Each chat opens in a window of its own, by default, so every chat has its own taskbar button. Settings, Chats in their own windows, switches it off for the one-window look. Right click a chat for Open in its own window. A chat that already has a window comes to the front instead of opening another.
+- A chat window shows only its chat and is named after it. The main window keeps the chat list, the sounds, the notices and the unread count, so nothing is announced twice. Notices stay quiet while any Ember window is the one in use.
+
 ## 0.2.2
 
 - Change server no longer opens a second window. The page for choosing a server replaces the web app inside the one window, with the current server filled in and a Cancel link to go back. The first run uses the same page.

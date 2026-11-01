@@ -4,9 +4,18 @@ Ember on Windows, macOS and Linux: a small native shell (Tauri 2) around the Emb
 
 Windows needs Windows 10 or later (the shell uses Microsoft's WebView2). Older systems keep using the native Hearth client or a browser.
 
+## Downloads
+
+Get them from the [latest release](https://github.com/modnite/ember-desktop/releases/latest).
+
+- **Windows 10 and later:** `Ember_x.y.z_x64-setup.exe`. It installs for you only, with no admin rights. The installer is not signed, so Windows shows "unknown publisher": choose More info, then Run anyway.
+- **macOS 10.15 and later (Apple silicon and Intel):** `Ember_x.y.z_universal.dmg`. The app is not signed by Apple, so the first time, right click Ember and choose Open, then confirm.
+- **Linux:** `Ember_x.y.z_amd64.AppImage` (make it executable and run it) or the `.deb` for Debian and Ubuntu. Needs WebKitGTK 4.1 (Ubuntu 22.04 or newer).
+
 ## What the shell adds
 
 - **A tray icon.** Left click opens Ember. The menu has: Change server, keep running in the tray when closed, start when I sign in, Quit.
+- **Chats in windows of their own.** Each chat opens in its own window (and taskbar button), by default. Turn it off in Settings, Chats in their own windows, for one window with everything in it.
 - **Closing the window keeps Ember running** (messages and calls still arrive), unless you switch that off in the tray menu.
 - **System notifications** for new messages, nudges and calls, only when the window is not the one in use. Switch them off in Settings, Desktop alerts.
 - **A flashing taskbar button** for messages, and a longer flash for nudges and calls.

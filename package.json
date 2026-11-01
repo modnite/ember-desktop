@@ -1,6 +1,6 @@
 {
   "name": "ember-desktop",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Ember for the desktop: a small native shell around the Ember web app",
   "scripts": {
