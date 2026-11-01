@@ -16,13 +16,15 @@ Windows needs Windows 10 or later (the shell uses Microsoft's WebView2). Older s
 
 ## First run
 
-Type your server's address (`ember.example.com`; a bare address tries https, then http). The shell checks that a Hearth server answers, remembers it and opens it. Change server in the tray menu does it again.
+Type your server's address (`ember.example.com`; a bare address tries https, then http). The shell checks that a Hearth server answers, remembers it and opens it. Change server does it again: in Settings (Server), on the sign-in page, or in the tray menu.
+
+Use the address of the **Ember web app** (for example `ember.example.com`), not the Hearth web address (`call.example.com`). The shell opens that address as a page, so it has to be the one that serves Ember. Android only talks to the server's API, which is why either address works there.
 
 Settings are in `%APPDATA%\org.hearth.ember.desktop\settings.json` (the matching folder on macOS and Linux).
 
 ## What the web app may ask the shell
 
-The page from your server can only call three things: show a notification, flash the taskbar, set the unread count. Choosing the server is only possible from the shell's own page. See `src-tauri/capabilities`.
+The page from your server can only ask for four things: show a notification, flash the taskbar, set the unread count, and open the shell's page for choosing a server. Choosing the server itself is only possible from that shell page. See `src-tauri/capabilities`.
 
 ## Build
 

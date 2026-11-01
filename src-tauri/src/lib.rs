@@ -46,6 +46,11 @@ struct Shared {
 }
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
+    // A debug build can keep its settings elsewhere, so trying things out never touches an installed copy's settings.
+    #[cfg(debug_assertions)]
+    if let Ok(dir) = std::env::var("EMBER_DESKTOP_CONFIG_DIR") {
+        return Some(PathBuf::from(dir).join("settings.json"));
+    }
     app.path().app_config_dir().ok().map(|d| d.join("settings.json"))
 }
 
@@ -82,17 +87,44 @@ fn candidates(input: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether a Hearth server answers at this address: every one tells how people may register at /api/auth/config.
-fn answers(origin: &str) -> bool {
-    let Ok(client) = reqwest::blocking::Client::builder().timeout(Duration::from_secs(6)).build() else { return false };
-    client
-        .get(format!("{origin}/api/auth/config"))
+/// What is at an address. Told apart so the message can say what is actually wrong.
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
+enum Probe {
+    /// Nothing answered (a wrong name, no connection, a network that cannot reach it).
+    Unreachable,
+    /// Something answered, but it is not a Hearth server.
+    NotHearth,
+    /// A Hearth server, but this address does not offer the Ember web app (it may be the Hearth web app instead).
+    NoEmber,
+    Ok,
+}
+
+fn probe(origin: &str) -> Probe {
+    let Ok(client) = reqwest::blocking::Client::builder().timeout(Duration::from_secs(6)).build() else { return Probe::Unreachable };
+    // Every Hearth server tells how people may register at /api/auth/config.
+    let Ok(config) = client.get(format!("{origin}/api/auth/config")).send() else { return Probe::Unreachable };
+    let hearth = config
+        .status()
+        .is_success()
+        .then(|| config.text().ok())
+        .flatten()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|v| v.get("registration").is_some())
+        .unwrap_or(false);
+    if !hearth {
+        return Probe::NotHearth;
+    }
+    // The Ember web app says who it is in its manifest.
+    let ember = client
+        .get(format!("{origin}/manifest.webmanifest"))
         .send()
         .ok()
         .filter(|r| r.status().is_success())
         .and_then(|r| r.text().ok())
-        .map(|text| serde_json::from_str::<serde_json::Value>(&text).map(|v| v.get("registration").is_some()).unwrap_or(false))
-        .unwrap_or(false)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|v| v.get("short_name").and_then(|n| n.as_str()) == Some("Ember"))
+        .unwrap_or(false);
+    if ember { Probe::Ok } else { Probe::NoEmber }
 }
 
 fn resolve_server(input: &str) -> Result<String, String> {
@@ -100,10 +132,22 @@ fn resolve_server(input: &str) -> Result<String, String> {
     if options.is_empty() {
         return Err("Type the address of your server, for example ember.example.com.".into());
     }
-    options
-        .into_iter()
-        .find(|o| answers(o))
-        .ok_or_else(|| "No Hearth server answered at that address. Check it and your connection.".to_string())
+    let mut worst = Probe::Unreachable;
+    for origin in &options {
+        let found = probe(origin);
+        if found == Probe::Ok {
+            return Ok(origin.clone());
+        }
+        if found > worst {
+            worst = found;
+        }
+    }
+    let host = Url::parse(&options[0]).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| input.trim().to_string());
+    Err(match worst {
+        Probe::NoEmber => format!("{host} is a Hearth server, but it does not offer the Ember web app. Ember usually has its own address, for example ember.yourdomain.com."),
+        Probe::NotHearth => format!("{host} answered, but it is not a Hearth server."),
+        _ => format!("Could not reach {host}. Check the address and your connection. A name that only resolves inside your home network will not answer from elsewhere, and the other way round."),
+    })
 }
 
 fn same_origin(a: &Url, b: &Url) -> bool {
@@ -113,7 +157,6 @@ fn same_origin(a: &Url, b: &Url) -> bool {
 /// The window with the web app. It may only show the person's own server: any other address opens in the default browser instead.
 fn build_main(app: &AppHandle, server: &str, visible: bool) -> tauri::Result<WebviewWindow> {
     let home = Url::parse(server).expect("a saved server address is a valid address");
-    let guard_home = home.clone();
     let guard_app = app.clone();
     let popup_app = app.clone();
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(home))
@@ -122,7 +165,9 @@ fn build_main(app: &AppHandle, server: &str, visible: bool) -> tauri::Result<Web
         .min_inner_size(380.0, 480.0)
         .visible(visible)
         .on_navigation(move |url| {
-            if same_origin(url, &guard_home) || url.scheme() == "about" || url.scheme() == "blob" || url.scheme() == "data" {
+            // Whichever server is chosen now (it can be changed while the window is open).
+            let current = guard_app.state::<Shared>().settings.lock().unwrap().server.clone().and_then(|s| Url::parse(&s).ok());
+            if current.map(|c| same_origin(url, &c)).unwrap_or(false) || url.scheme() == "about" || url.scheme() == "blob" || url.scheme() == "data" {
                 return true;
             }
             let _ = guard_app.opener().open_url(url.as_str(), None::<&str>);
@@ -173,15 +218,23 @@ async fn set_server(app: AppHandle, input: String) -> Result<String, String> {
     save_settings(&app);
     let url = Url::parse(&origin).map_err(|e| e.to_string())?;
     if let Some(main) = app.get_webview_window(MAIN) {
-        // The shell only follows the address it was given, so a changed server needs a fresh window.
-        let _ = main.destroy();
-        let _ = url;
+        main.navigate(url).map_err(|e| e.to_string())?;
+        let _ = main.show();
+        let _ = main.set_focus();
+    } else {
+        build_main(&app, &origin, true).map_err(|e| e.to_string())?;
     }
-    build_main(&app, &origin, true).map_err(|e| e.to_string())?;
     if let Some(setup) = app.get_webview_window(SETUP) {
         let _ = setup.close();
     }
     Ok(origin)
+}
+
+/// The web app's own "Change server" button: opens the page where the address is typed.
+#[tauri::command]
+// Async, because a window made from a plain command can stall on Windows while the command waits for it.
+async fn open_server_picker(app: AppHandle) {
+    open_setup(&app);
 }
 
 #[tauri::command]
@@ -283,7 +336,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, open_server_picker, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
