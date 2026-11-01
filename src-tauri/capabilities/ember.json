@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "ember",
-  "description": "The Ember web app, loaded from the person's own server: only notifications, taskbar flashing, the unread count and the Change server button",
-  "windows": ["main"],
+  "description": "The Ember web app, loaded from the person's own server: only notifications, taskbar flashing, the unread count, the Change server button and chat windows",
+  "windows": ["main", "chat-*"],
   "remote": {
     "urls": ["https://*", "https://*:*", "http://*", "http://*:*"]
   },
-  "permissions": ["allow-notify-desktop", "allow-attention", "allow-set-unread", "allow-open-server-picker"]
+  "permissions": ["allow-notify-desktop", "allow-attention", "allow-set-unread", "allow-open-server-picker", "allow-open-chat-window", "allow-set-window-title", "allow-close-window"]
 }

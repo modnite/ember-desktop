@@ -196,6 +196,19 @@ fn is_local(url: &Url) -> bool {
     url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
 }
 
+/// What a window may navigate to: the shell's own page, the chosen server and a few inline kinds. Anything else opens in the default browser.
+fn nav_guard(app: AppHandle) -> impl Fn(&Url) -> bool + Send + Sync + 'static {
+    move |url| {
+        // Whichever server is chosen now (it can be changed while the window is open).
+        let current = app.state::<Shared>().settings.lock().unwrap().server.clone().and_then(|s| Url::parse(&s).ok());
+        if is_local(url) || current.map(|c| same_origin(url, &c)).unwrap_or(false) || matches!(url.scheme(), "about" | "blob" | "data") {
+            return true;
+        }
+        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+        false
+    }
+}
+
 /// The one window. It shows the person's own server (or the shell's page for choosing one) and nothing else: any other address opens in
 /// the default browser instead.
 fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Result<WebviewWindow> {
@@ -210,15 +223,7 @@ fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Re
         .inner_size(1100.0, 760.0)
         .min_inner_size(380.0, 480.0)
         .visible(visible)
-        .on_navigation(move |url| {
-            // Whichever server is chosen now (it can be changed while the window is open).
-            let current = guard_app.state::<Shared>().settings.lock().unwrap().server.clone().and_then(|s| Url::parse(&s).ok());
-            if is_local(url) || current.map(|c| same_origin(url, &c)).unwrap_or(false) || matches!(url.scheme(), "about" | "blob" | "data") {
-                return true;
-            }
-            let _ = guard_app.opener().open_url(url.as_str(), None::<&str>);
-            false
-        })
+        .on_navigation(nav_guard(guard_app))
         .on_new_window(move |url, _features| {
             let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
             tauri::webview::NewWindowResponse::Deny
@@ -272,6 +277,50 @@ async fn set_server(app: AppHandle, input: String) -> Result<String, String> {
     Ok(origin)
 }
 
+/// A chat in a window of its own (a window per chat, for people who do not like one window for everything). The page is the same web app,
+/// started in its "solo" form that shows just that chat. A chat already open in a window comes to the front instead.
+#[tauri::command]
+async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Result<(), String> {
+    let id: String = room_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    if id.is_empty() {
+        return Err("no chat to open".into());
+    }
+    let label = format!("chat-{id}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let server = saved_server(&app).ok_or_else(|| "no server chosen".to_string())?;
+    let url = Url::parse(&format!("{server}/?solo=1#/chat/{id}")).map_err(|e| e.to_string())?;
+    let popup_app = app.clone();
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
+        .title(if title.trim().is_empty() { "Ember".to_string() } else { title })
+        .inner_size(520.0, 720.0)
+        .min_inner_size(360.0, 420.0)
+        .on_navigation(nav_guard(app.clone()))
+        .on_new_window(move |url, _features| {
+            let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A chat window names itself after its chat.
+#[tauri::command]
+fn set_window_title(window: tauri::WebviewWindow, title: String) {
+    let _ = window.set_title(&title);
+}
+
+/// A chat window closes itself (when the chat is left, for instance).
+#[tauri::command]
+fn close_window(window: tauri::WebviewWindow) {
+    let _ = window.close();
+}
+
 /// Leave the page for choosing a server and go back to the one already chosen.
 #[tauri::command]
 fn return_to_server(app: AppHandle) {
@@ -299,10 +348,9 @@ fn get_server(app: AppHandle) -> Option<String> {
 fn notify_desktop(app: AppHandle, title: String, body: String) {
     #[cfg(debug_assertions)]
     eprintln!("notify_desktop: {title} / {body}");
-    if let Some(w) = app.get_webview_window(MAIN) {
-        if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
-            return;
-        }
+    // Nothing to announce while any window of Ember is the one in use.
+    if app.webview_windows().values().any(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)) {
+        return;
     }
     let _ = app.notification().builder().title(title).body(body).show();
 }
@@ -312,10 +360,10 @@ fn notify_desktop(app: AppHandle, title: String, body: String) {
 fn attention(app: AppHandle, critical: bool) {
     #[cfg(debug_assertions)]
     eprintln!("attention: critical={critical}");
+    if app.webview_windows().values().any(|w| w.is_focused().unwrap_or(false)) {
+        return;
+    }
     if let Some(w) = app.get_webview_window(MAIN) {
-        if w.is_focused().unwrap_or(false) {
-            return;
-        }
         let kind = if critical { UserAttentionType::Critical } else { UserAttentionType::Informational };
         let _ = w.request_user_attention(Some(kind));
     }
@@ -390,7 +438,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
