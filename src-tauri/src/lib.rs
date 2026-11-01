@@ -48,6 +48,12 @@ struct Shared {
     start_hidden: AtomicBool,
 }
 
+/// Browser flags for every window. The page is the person's own Ember server, so a call may use the microphone and camera without the
+/// webview asking: its permission prompt does not show in these windows, and the question waiting unanswered left the call silent. Every window
+/// has to use the same flags because they share one profile.
+#[cfg(windows)]
+const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream";
+
 const THIN_WIDTH: f64 = 400.0;
 const THIN_HEIGHT: f64 = 780.0;
 const WIDE_WIDTH: f64 = 1100.0;
@@ -235,7 +241,10 @@ fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Re
     // The window is made hidden and shown when the page says it has drawn itself (window_ready, or after a few seconds anyway), so it never
     // opens as a blank or white box.
     let _ = visible;
-    let window = WebviewWindowBuilder::new(app, MAIN, start)
+    let builder = WebviewWindowBuilder::new(app, MAIN, start);
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(WEBVIEW_ARGS);
+    let window = builder
         .title("Ember")
         .inner_size(if thin { THIN_WIDTH } else { WIDE_WIDTH }, if thin { THIN_HEIGHT } else { WIDE_HEIGHT })
         .min_inner_size(if thin { 320.0 } else { 380.0 }, 480.0)
@@ -401,7 +410,10 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
     let popup_app = app.clone();
     // Each new chat window steps down and to the right of the last one, so they never open exactly on top of each other.
     let others = app.webview_windows().keys().filter(|k| k.starts_with("chat-")).count() as f64;
-    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url));
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(WEBVIEW_ARGS);
+    let window = builder
         .title(if title.trim().is_empty() { "Ember".to_string() } else { title })
         .inner_size(460.0, 720.0)
         .min_inner_size(340.0, 420.0)

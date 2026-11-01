@@ -2,6 +2,10 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.4.2
+
+- Fixed: the other person could not hear you in a call. The window asked for permission to use the microphone, the question never showed, and the call stayed silent. On Windows the microphone and camera now work in calls without asking, for your own server's pages only.
+
 ## 0.4.1
 
 - A nudge shakes the window the chat is in, sent or received. It is the real window that shakes, and the system's reduced motion setting does not switch it off.
