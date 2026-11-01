@@ -42,6 +42,7 @@
   const error = document.getElementById('error');
   const go = document.getElementById('go');
   const cancel = document.getElementById('cancel');
+  invoke('window_ready').catch(() => {});
   // With a server already chosen this page was opened to change it, so there is a way back.
   invoke('get_server').then((s) => { if (s) { input.value = s.replace(/^https:\/\//, ''); cancel.hidden = false; } }).catch(() => {});
   cancel.addEventListener('click', () => { invoke('return_to_server').catch(() => {}); });

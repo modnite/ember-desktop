@@ -6,5 +6,5 @@
   "remote": {
     "urls": ["https://*", "https://*:*", "http://*", "http://*:*"]
   },
-  "permissions": ["allow-notify-desktop", "allow-attention", "allow-set-unread", "allow-open-server-picker", "allow-open-chat-window", "allow-set-window-title", "allow-close-window"]
+  "permissions": ["allow-notify-desktop", "allow-attention", "allow-set-unread", "allow-open-server-picker", "allow-open-chat-window", "allow-set-window-title", "allow-close-window", "allow-window-ready", "allow-set-window-layout"]
 }

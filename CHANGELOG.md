@@ -2,6 +2,11 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.4.0
+
+- The window is thin. The sign-in page and the chat list (when chats have windows of their own) open at phone width, and the empty "Pick a chat" pane is gone in that mode. Switching Chats in their own windows off makes the window wide again.
+- Windows open cleanly. They stay hidden until their page has drawn itself, so there is no blank flash, and each new chat window opens a little down and to the right of the last one.
+
 ## 0.3.0
 
 - Each chat opens in a window of its own, by default, so every chat has its own taskbar button. Settings, Chats in their own windows, switches it off for the one-window look. Right click a chat for Open in its own window. A chat that already has a window comes to the front instead of opening another.

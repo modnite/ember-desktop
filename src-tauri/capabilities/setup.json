@@ -3,5 +3,5 @@
   "identifier": "setup",
   "description": "The shell's own page where the server address is typed, shown in the main window",
   "windows": ["main"],
-  "permissions": ["core:default", "allow-set-server", "allow-get-server", "allow-return-to-server"]
+  "permissions": ["core:default", "allow-set-server", "allow-get-server", "allow-return-to-server", "allow-window-ready"]
 }

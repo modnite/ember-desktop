@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Url, UserAttentionType, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, Url, UserAttentionType, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_notification::NotificationExt;
@@ -31,17 +31,30 @@ struct Settings {
     server: Option<String>,
     /// Closing the window keeps Ember running in the tray, so messages and calls still arrive.
     close_to_tray: bool,
+    /// The main window is narrow ("thin": the sign-in page, and the chat list when chats have windows of their own) or wide (everything in it).
+    layout: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { server: None, close_to_tray: true }
+        Settings { server: None, close_to_tray: true, layout: "thin".into() }
     }
 }
 
 struct Shared {
     settings: Mutex<Settings>,
     quitting: AtomicBool,
+    /// Started with --minimized: the first window stays hidden in the tray until it is opened.
+    start_hidden: AtomicBool,
+}
+
+const THIN_WIDTH: f64 = 400.0;
+const THIN_HEIGHT: f64 = 780.0;
+const WIDE_WIDTH: f64 = 1100.0;
+const WIDE_HEIGHT: f64 = 760.0;
+
+fn is_thin(layout: &str) -> bool {
+    layout != "wide"
 }
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
@@ -218,17 +231,68 @@ fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Re
     };
     let guard_app = app.clone();
     let popup_app = app.clone();
-    WebviewWindowBuilder::new(app, MAIN, start)
+    let thin = is_thin(&app.state::<Shared>().settings.lock().unwrap().layout);
+    // The window is made hidden and shown when the page says it has drawn itself (window_ready, or after a few seconds anyway), so it never
+    // opens as a blank or white box.
+    let _ = visible;
+    let window = WebviewWindowBuilder::new(app, MAIN, start)
         .title("Ember")
-        .inner_size(1100.0, 760.0)
-        .min_inner_size(380.0, 480.0)
-        .visible(visible)
+        .inner_size(if thin { THIN_WIDTH } else { WIDE_WIDTH }, if thin { THIN_HEIGHT } else { WIDE_HEIGHT })
+        .min_inner_size(if thin { 320.0 } else { 380.0 }, 480.0)
+        .visible(false)
         .on_navigation(nav_guard(guard_app))
         .on_new_window(move |url, _features| {
             let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
             tauri::webview::NewWindowResponse::Deny
         })
-        .build()
+        .build()?;
+    show_when_ready(app, &window);
+    Ok(window)
+}
+
+/// Show a window that was made hidden if its page has not asked for that within a few seconds (a page that fails to load still needs to be seen).
+fn show_when_ready(app: &AppHandle, window: &WebviewWindow) {
+    let app = app.clone();
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(5));
+        reveal(&app, &window);
+    });
+}
+
+/// Show a window that was waiting for its page, unless it is the main window that was started minimized into the tray.
+fn reveal(app: &AppHandle, window: &WebviewWindow) {
+    let hold = window.label() == MAIN && app.state::<Shared>().start_hidden.load(Ordering::SeqCst);
+    if !hold && !window.is_visible().unwrap_or(true) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// The page has drawn itself: show its window.
+#[tauri::command]
+fn window_ready(app: AppHandle, window: tauri::WebviewWindow) {
+    reveal(&app, &window);
+}
+
+/// Make the main window narrow or wide to suit what it shows: the sign-in page and a chat list that has its windows elsewhere are narrow.
+/// Only a change of layout resizes the window, so a size the person chose is left alone.
+#[tauri::command]
+fn set_window_layout(app: AppHandle, thin: bool) {
+    let want = if thin { "thin" } else { "wide" };
+    {
+        let shared = app.state::<Shared>();
+        let mut settings = shared.settings.lock().unwrap();
+        if settings.layout == want {
+            return;
+        }
+        settings.layout = want.into();
+    }
+    save_settings(&app);
+    if let Some(w) = app.get_webview_window(MAIN) {
+        let _ = w.set_min_size(Some(LogicalSize::new(if thin { 320.0 } else { 380.0 }, 480.0)));
+        let _ = w.set_size(LogicalSize::new(if thin { THIN_WIDTH } else { WIDE_WIDTH }, if thin { THIN_HEIGHT } else { WIDE_HEIGHT }));
+    }
 }
 
 fn saved_server(app: &AppHandle) -> Option<String> {
@@ -236,6 +300,7 @@ fn saved_server(app: &AppHandle) -> Option<String> {
 }
 
 fn show_window(app: &AppHandle) {
+    app.state::<Shared>().start_hidden.store(false, Ordering::SeqCst);
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.show();
         let _ = w.unminimize();
@@ -248,6 +313,7 @@ fn show_window(app: &AppHandle) {
 
 /// Show the page for choosing a server in the main window, in place of the web app.
 fn open_setup(app: &AppHandle) {
+    app.state::<Shared>().start_hidden.store(false, Ordering::SeqCst);
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.navigate(local_page());
         let _ = w.show();
@@ -295,10 +361,13 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
     let server = saved_server(&app).ok_or_else(|| "no server chosen".to_string())?;
     let url = Url::parse(&format!("{server}/?solo=1#/chat/{id}")).map_err(|e| e.to_string())?;
     let popup_app = app.clone();
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
+    // Each new chat window steps down and to the right of the last one, so they never open exactly on top of each other.
+    let others = app.webview_windows().keys().filter(|k| k.starts_with("chat-")).count() as f64;
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
         .title(if title.trim().is_empty() { "Ember".to_string() } else { title })
-        .inner_size(520.0, 720.0)
-        .min_inner_size(360.0, 420.0)
+        .inner_size(460.0, 720.0)
+        .min_inner_size(340.0, 420.0)
+        .visible(false)
         .on_navigation(nav_guard(app.clone()))
         .on_new_window(move |url, _features| {
             let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
@@ -306,6 +375,13 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
         })
         .build()
         .map_err(|e| e.to_string())?;
+    if let Some(main) = app.get_webview_window(MAIN) {
+        if let (Ok(pos), Ok(scale)) = (main.outer_position(), main.scale_factor()) {
+            let step = 32.0 * scale * (others + 1.0);
+            let _ = window.set_position(PhysicalPosition::new(pos.x as f64 + step, pos.y as f64 + step));
+        }
+    }
+    show_when_ready(&app, &window);
     Ok(())
 }
 
@@ -438,7 +514,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, set_window_layout, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
@@ -451,10 +527,11 @@ pub fn run() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
-            app.manage(Shared { settings: Mutex::new(load_settings(&handle)), quitting: AtomicBool::new(false) });
+            app.manage(Shared { settings: Mutex::new(load_settings(&handle)), quitting: AtomicBool::new(false), start_hidden: AtomicBool::new(false) });
             build_tray(&handle)?;
             let minimized = std::env::args().any(|a| a == "--minimized");
             let server = saved_server(&handle);
+            handle.state::<Shared>().start_hidden.store(minimized && server.is_some(), Ordering::SeqCst);
             // Starting minimized only hides the window when there is a server to show; the first run needs the page for choosing one.
             build_main(&handle, server.as_deref(), !minimized || server.is_none())?;
             Ok(())
