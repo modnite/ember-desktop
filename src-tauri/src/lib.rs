@@ -62,6 +62,21 @@ const THIN_HEIGHT: f64 = 780.0;
 const WIDE_WIDTH: f64 = 1100.0;
 const WIDE_HEIGHT: f64 = 760.0;
 
+/// The size a window opens at, cut down to what the screen can show: the usable area (without the taskbar) less room for the title bar and
+/// the frame. A small screen (1366 by 768) otherwise gets a window taller than the screen, drawn behind the taskbar.
+fn fit_size(app: &AppHandle, want_w: f64, want_h: f64) -> (f64, f64) {
+    match app.primary_monitor() {
+        Ok(Some(m)) => {
+            let scale = m.scale_factor();
+            let area = m.work_area();
+            let w = area.size.width as f64 / scale - 24.0;
+            let h = area.size.height as f64 / scale - 96.0;
+            (want_w.min(w.max(320.0)), want_h.min(h.max(420.0)))
+        }
+        _ => (want_w, want_h),
+    }
+}
+
 fn is_thin(layout: &str) -> bool {
     layout != "wide"
 }
@@ -245,13 +260,15 @@ fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Re
     // The window is made hidden and shown when the page says it has drawn itself (window_ready, or after a few seconds anyway), so it never
     // opens as a blank or white box.
     let _ = visible;
+    let fit = if thin { fit_size(app, THIN_WIDTH, THIN_HEIGHT) } else { fit_size(app, WIDE_WIDTH, WIDE_HEIGHT) };
     let builder = WebviewWindowBuilder::new(app, MAIN, start);
     #[cfg(windows)]
     let builder = builder.additional_browser_args(WEBVIEW_ARGS);
     let window = builder
         .title("Ember")
-        .inner_size(if thin { THIN_WIDTH } else { WIDE_WIDTH }, if thin { THIN_HEIGHT } else { WIDE_HEIGHT })
-        .min_inner_size(if thin { 320.0 } else { 380.0 }, 480.0)
+        .inner_size(fit.0, fit.1)
+        .min_inner_size(if thin { 320.0 } else { 380.0 }, 420.0)
+        .center()
         .visible(false)
         .on_navigation(nav_guard(guard_app))
         .on_new_window(move |url, _features| {
@@ -349,7 +366,8 @@ fn set_window_layout(app: AppHandle, thin: bool) {
     save_settings(&app);
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.set_min_size(Some(LogicalSize::new(if thin { 320.0 } else { 380.0 }, 480.0)));
-        let _ = w.set_size(LogicalSize::new(if thin { THIN_WIDTH } else { WIDE_WIDTH }, if thin { THIN_HEIGHT } else { WIDE_HEIGHT }));
+        let fit = if thin { fit_size(&app, THIN_WIDTH, THIN_HEIGHT) } else { fit_size(&app, WIDE_WIDTH, WIDE_HEIGHT) };
+        let _ = w.set_size(LogicalSize::new(fit.0, fit.1));
     }
 }
 
@@ -426,8 +444,8 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
     let builder = builder.additional_browser_args(WEBVIEW_ARGS);
     let window = builder
         .title(if title.trim().is_empty() { "Ember".to_string() } else { title })
-        .inner_size(460.0, 720.0)
-        .min_inner_size(340.0, 420.0)
+        .inner_size(fit_size(&app, 460.0, 720.0).0, fit_size(&app, 460.0, 720.0).1)
+        .min_inner_size(340.0, 400.0)
         .visible(false)
         .on_navigation(nav_guard(app.clone()))
         .on_new_window(move |url, _features| {

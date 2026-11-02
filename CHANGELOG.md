@@ -2,6 +2,10 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.4.4
+
+- Windows fit small screens. They open no taller than the usable area of the screen (taskbar and title bar left out) and start centred, so on 1366 by 768 nothing is drawn behind the taskbar. The window is still free to resize.
+
 ## 0.4.3
 
 - Calls play sound even when the call was started without a click in the window (joined from a notice, for instance). The webview used to keep the other person silent until you clicked.
