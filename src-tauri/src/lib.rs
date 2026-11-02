@@ -62,22 +62,36 @@ const THIN_HEIGHT: f64 = 780.0;
 const WIDE_WIDTH: f64 = 1100.0;
 const WIDE_HEIGHT: f64 = 760.0;
 
-/// The size a window opens at, cut down to what the screen can show. The usable area is taken from the primary monitor (or any monitor when
-/// there is no primary one) and, since some systems report the whole screen as usable, a generous allowance is left for panels, the title bar
-/// and the frame. When no screen can be found at all a small one (1366 by 768) is assumed, so a window is never taller than the screen.
-fn fit_size(app: &AppHandle, want_w: f64, want_h: f64) -> (f64, f64) {
+/// What a window of the wanted size becomes on a screen whose usable area is `screen_w` by `screen_h` (logical pixels): never wider or taller
+/// than the screen less a generous allowance for panels, the title bar and the frame (some systems report the whole screen as usable), and
+/// never smaller than a window can usefully be.
+pub fn fit(screen_w: f64, screen_h: f64, want_w: f64, want_h: f64) -> (f64, f64) {
+    let w = (screen_w - 48.0).max(320.0);
+    let h = (screen_h - 160.0).max(420.0);
+    (want_w.min(w), want_h.min(h))
+}
+
+/// The usable area of the screen, in logical pixels. Debug builds take `EMBER_SCREEN=1366x768` to pretend a screen of that size.
+fn screen_size(app: &AppHandle) -> (f64, f64) {
+    #[cfg(debug_assertions)]
+    if let Some((w, h)) = std::env::var("EMBER_SCREEN").ok().and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?)))) {
+        return (w, h);
+    }
     let monitor = app.primary_monitor().ok().flatten().or_else(|| app.available_monitors().ok().and_then(|m| m.into_iter().next()));
-    let (screen_w, screen_h) = match monitor {
+    match monitor {
         Some(m) => {
             let scale = m.scale_factor().max(1.0);
             let area = m.work_area();
             (area.size.width as f64 / scale, area.size.height as f64 / scale)
         }
+        // No screen found: assume a small one, so a window is never taller than the screen.
         None => (1366.0, 768.0),
-    };
-    let w = (screen_w - 48.0).max(320.0);
-    let h = (screen_h - 160.0).max(420.0);
-    (want_w.min(w), want_h.min(h))
+    }
+}
+
+fn fit_size(app: &AppHandle, want_w: f64, want_h: f64) -> (f64, f64) {
+    let (w, h) = screen_size(app);
+    fit(w, h, want_w, want_h)
 }
 
 fn is_thin(layout: &str) -> bool {
@@ -620,4 +634,41 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("Ember could not start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit;
+
+    /// Usable areas (logical pixels) of common screens, taskbars already taken off or not: the result must fit with room to spare.
+    const SCREENS: &[(&str, f64, f64)] = &[
+        ("1280x720", 1280.0, 720.0),
+        ("1366x768", 1366.0, 768.0),
+        ("1366x768 with a 40px taskbar", 1366.0, 728.0),
+        ("1280x800", 1280.0, 800.0),
+        ("1440x900", 1440.0, 900.0),
+        ("1536x864 (1080p at 125%)", 1536.0, 864.0),
+        ("1600x900", 1600.0, 900.0),
+        ("1920x1080", 1920.0, 1080.0),
+        ("1920x1200", 1920.0, 1200.0),
+        ("2560x1440", 2560.0, 1440.0),
+        ("3840x2160 at 200%", 1920.0, 1080.0),
+    ];
+
+    #[test]
+    fn windows_fit_every_common_screen() {
+        for (name, w, h) in SCREENS {
+            for (kind, ww, wh) in [("thin", 400.0, 780.0), ("wide", 1100.0, 760.0), ("chat", 460.0, 720.0)] {
+                let (fw, fh) = fit(*w, *h, ww, wh);
+                assert!(fw <= w - 48.0 && fh <= h - 160.0, "{kind} window {fw}x{fh} does not leave room on {name}");
+                assert!(fw >= 320.0 && fh >= 420.0, "{kind} window {fw}x{fh} is too small on {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn big_screens_keep_the_wanted_size() {
+        assert_eq!(fit(2560.0, 1440.0, 1100.0, 760.0), (1100.0, 760.0));
+        assert_eq!(fit(1920.0, 1080.0, 400.0, 780.0), (400.0, 780.0));
+    }
 }
