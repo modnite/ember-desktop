@@ -2,6 +2,11 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.5.0
+
+- Updates come from this app's own releases. Settings, About Ember shows the app's version, the server's version, and looks for a newer app on GitHub. On Windows it downloads the installer and starts it (the app closes so it can be replaced); on Mac and Linux it opens the download. Only files from this project's releases are accepted.
+- Links to the source of every part are in the same place.
+
 ## 0.4.5
 
 - Windows are cut down much harder to the screen: 160 pixels are left for panels, the title bar and the frame, because some Linux systems report the whole screen as free. When no screen can be found a 1366 by 768 one is assumed. A window can no longer open taller than a small screen.

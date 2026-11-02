@@ -343,6 +343,93 @@ fn allow_servers(app: AppHandle, urls: Vec<String>) {
     *app.state::<Shared>().group.lock().unwrap() = parsed;
 }
 
+const RELEASES: &str = "https://api.github.com/repos/modnite/ember-desktop/releases/latest";
+const DOWNLOADS: &str = "https://github.com/modnite/ember-desktop/releases/download/";
+
+/// "0.4.5", "v0.4.5" and "0.4.5-debug" are all [0, 4, 5].
+pub fn version_parts(v: &str) -> Vec<u32> {
+    v.trim().trim_start_matches(['v', 'V']).split('-').next().unwrap_or("").split('.').map(|p| p.parse().unwrap_or(0)).collect()
+}
+
+/// Whether `latest` is a newer version than `current`.
+pub fn is_newer(latest: &str, current: &str) -> bool {
+    let (a, b) = (version_parts(latest), version_parts(current));
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// The installer of a release for this kind of computer, by the name the build workflow gives it.
+fn installer_for_this_os(assets: &[serde_json::Value]) -> Option<String> {
+    let suffix = if cfg!(target_os = "windows") { "x64-setup.exe" } else if cfg!(target_os = "macos") { ".dmg" } else { ".AppImage" };
+    assets
+        .iter()
+        .find(|a| a.get("name").and_then(|n| n.as_str()).map(|n| n.ends_with(suffix)).unwrap_or(false))
+        .and_then(|a| a.get("browser_download_url").and_then(|u| u.as_str()).map(str::to_string))
+}
+
+/// What the About page shows about this app.
+#[tauri::command]
+fn app_info(app: AppHandle) -> serde_json::Value {
+    serde_json::json!({ "version": app.package_info().version.to_string(), "os": std::env::consts::OS, "arch": std::env::consts::ARCH })
+}
+
+/// Look for a newer Ember desktop on the project's GitHub releases.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<serde_json::Value, String> {
+    let current = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(15)).user_agent("Ember-desktop").build().map_err(|e| e.to_string())?;
+        let text = client.get(RELEASES).send().map_err(|_| "Could not reach GitHub.".to_string())?.text().map_err(|e| e.to_string())?;
+        let release: serde_json::Value = serde_json::from_str(&text).map_err(|_| "GitHub gave an answer that could not be read.".to_string())?;
+        let tag = release.get("tag_name").and_then(|t| t.as_str()).ok_or("There is no release yet.")?.trim_start_matches('v').to_string();
+        let assets = release.get("assets").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+        Ok(serde_json::json!({
+            "current": current,
+            "latest": tag,
+            "newer": is_newer(&tag, &current),
+            "page": release.get("html_url").and_then(|u| u.as_str()).unwrap_or("https://github.com/modnite/ember-desktop/releases/latest"),
+            "installer": installer_for_this_os(&assets),
+            "notes": release.get("body").and_then(|b| b.as_str()).unwrap_or(""),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Install an update: on Windows the installer is downloaded and started (this app quits so it can be replaced); elsewhere the download opens in
+/// the browser. Only files of this project's releases are accepted.
+#[tauri::command]
+async fn install_update(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with(DOWNLOADS) {
+        return Err("That is not a download of this app.".into());
+    }
+    if !cfg!(target_os = "windows") {
+        return app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string());
+    }
+    let path = tauri::async_runtime::spawn_blocking(move || -> Result<std::path::PathBuf, String> {
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(600)).user_agent("Ember-desktop").build().map_err(|e| e.to_string())?;
+        let bytes = client.get(&url).send().and_then(|r| r.error_for_status()).and_then(|r| r.bytes()).map_err(|_| "The download did not finish.".to_string())?;
+        if bytes.len() < 1_000_000 {
+            return Err("The download is too small to be the installer.".into());
+        }
+        let name = url.rsplit('/').next().unwrap_or("Ember-setup.exe").to_string();
+        let path = std::env::temp_dir().join(name);
+        fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(path)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    std::process::Command::new(&path).spawn().map_err(|e| e.to_string())?;
+    app.state::<Shared>().quitting.store(true, Ordering::SeqCst);
+    app.exit(0);
+    Ok(())
+}
+
 /// A nudge shakes the window the chat is in (the chat's own window, else the main one) side to side and back. The window is put back where it was.
 #[tauri::command]
 fn shake_chat(app: AppHandle, room_id: String) {
@@ -610,7 +697,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
-        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, allow_servers, shake_chat, close_chat_windows, set_window_layout, notify_desktop, attention, set_unread])
+        .invoke_handler(tauri::generate_handler![set_server, get_server, return_to_server, open_server_picker, open_chat_window, set_window_title, close_window, window_ready, app_info, check_update, install_update, allow_servers, shake_chat, close_chat_windows, set_window_layout, notify_desktop, attention, set_unread])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Shared>();
@@ -638,7 +725,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{fit, is_newer};
 
     /// Usable areas (logical pixels) of common screens, taskbars already taken off or not: the result must fit with room to spare.
     const SCREENS: &[(&str, f64, f64)] = &[
@@ -664,6 +751,15 @@ mod tests {
                 assert!(fw >= 320.0 && fh >= 420.0, "{kind} window {fw}x{fh} is too small on {name}");
             }
         }
+    }
+
+    #[test]
+    fn versions_compare_by_number() {
+        assert!(is_newer("0.4.10", "0.4.9"));
+        assert!(is_newer("v1.0.0", "0.9.9"));
+        assert!(!is_newer("0.4.5", "0.4.5"));
+        assert!(!is_newer("0.4.4", "0.4.5-debug"));
+        assert!(is_newer("0.5", "0.4.9"));
     }
 
     #[test]
