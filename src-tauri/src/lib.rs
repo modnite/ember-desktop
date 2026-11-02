@@ -57,6 +57,16 @@ struct Shared {
 #[cfg(windows)]
 const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required";
 
+/// The flags above, or (debug builds only, to see how the webview behaves without them) the plain ones when EMBER_PLAIN_WEBVIEW is set.
+#[cfg(windows)]
+fn webview_args() -> String {
+    #[cfg(debug_assertions)]
+    if std::env::var("EMBER_PLAIN_WEBVIEW").is_ok() {
+        return "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection".to_string();
+    }
+    WEBVIEW_ARGS.to_string()
+}
+
 const THIN_WIDTH: f64 = 400.0;
 const THIN_HEIGHT: f64 = 780.0;
 const WIDE_WIDTH: f64 = 1100.0;
@@ -280,7 +290,7 @@ fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Re
     let fit = if thin { fit_size(app, THIN_WIDTH, THIN_HEIGHT) } else { fit_size(app, WIDE_WIDTH, WIDE_HEIGHT) };
     let builder = WebviewWindowBuilder::new(app, MAIN, start);
     #[cfg(windows)]
-    let builder = builder.additional_browser_args(WEBVIEW_ARGS);
+    let builder = builder.additional_browser_args(&webview_args());
     let window = builder
         .title("Ember")
         .inner_size(fit.0, fit.1)
@@ -545,7 +555,7 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
     let others = app.webview_windows().keys().filter(|k| k.starts_with("chat-")).count() as f64;
     let builder = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url));
     #[cfg(windows)]
-    let builder = builder.additional_browser_args(WEBVIEW_ARGS);
+    let builder = builder.additional_browser_args(&webview_args());
     let window = builder
         .title(if title.trim().is_empty() { "Ember".to_string() } else { title })
         .inner_size(fit_size(&app, 460.0, 720.0).0, fit_size(&app, 460.0, 720.0).1)
