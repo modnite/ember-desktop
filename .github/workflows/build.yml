@@ -1,12 +1,12 @@
 name: build
 
 # Builds the Ember desktop installers on Windows, macOS and Linux and attaches them to a release.
-# Run it from the Actions tab (or with `gh workflow run build.yml -f tag=v0.4.4`) once the release for that tag exists.
+# Run it from the Actions tab (or with `gh workflow run build.yml -f tag=v0.4.5`) once the release for that tag exists.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to attach the installers to (for example v0.4.4)
+        description: Release tag to attach the installers to (for example v0.4.5)
         required: true
 
 permissions:

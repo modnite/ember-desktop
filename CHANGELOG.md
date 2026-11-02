@@ -2,6 +2,10 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.4.5
+
+- Windows are cut down much harder to the screen: 160 pixels are left for panels, the title bar and the frame, because some Linux systems report the whole screen as free. When no screen can be found a 1366 by 768 one is assumed. A window can no longer open taller than a small screen.
+
 ## 0.4.4
 
 - Windows fit small screens. They open no taller than the usable area of the screen (taskbar and title bar left out) and start centred, so on 1366 by 768 nothing is drawn behind the taskbar. The window is still free to resize.

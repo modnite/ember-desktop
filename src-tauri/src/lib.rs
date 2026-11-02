@@ -62,19 +62,22 @@ const THIN_HEIGHT: f64 = 780.0;
 const WIDE_WIDTH: f64 = 1100.0;
 const WIDE_HEIGHT: f64 = 760.0;
 
-/// The size a window opens at, cut down to what the screen can show: the usable area (without the taskbar) less room for the title bar and
-/// the frame. A small screen (1366 by 768) otherwise gets a window taller than the screen, drawn behind the taskbar.
+/// The size a window opens at, cut down to what the screen can show. The usable area is taken from the primary monitor (or any monitor when
+/// there is no primary one) and, since some systems report the whole screen as usable, a generous allowance is left for panels, the title bar
+/// and the frame. When no screen can be found at all a small one (1366 by 768) is assumed, so a window is never taller than the screen.
 fn fit_size(app: &AppHandle, want_w: f64, want_h: f64) -> (f64, f64) {
-    match app.primary_monitor() {
-        Ok(Some(m)) => {
-            let scale = m.scale_factor();
+    let monitor = app.primary_monitor().ok().flatten().or_else(|| app.available_monitors().ok().and_then(|m| m.into_iter().next()));
+    let (screen_w, screen_h) = match monitor {
+        Some(m) => {
+            let scale = m.scale_factor().max(1.0);
             let area = m.work_area();
-            let w = area.size.width as f64 / scale - 24.0;
-            let h = area.size.height as f64 / scale - 96.0;
-            (want_w.min(w.max(320.0)), want_h.min(h.max(420.0)))
+            (area.size.width as f64 / scale, area.size.height as f64 / scale)
         }
-        _ => (want_w, want_h),
-    }
+        None => (1366.0, 768.0),
+    };
+    let w = (screen_w - 48.0).max(320.0);
+    let h = (screen_h - 160.0).max(420.0);
+    (want_w.min(w), want_h.min(h))
 }
 
 fn is_thin(layout: &str) -> bool {
