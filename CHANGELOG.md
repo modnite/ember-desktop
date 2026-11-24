@@ -2,6 +2,10 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.5.2
+
+- Fixed on Linux: a nudge froze the chat window of the person who sent it and crashed the app of the person it was sent to. The whole window is moved for a nudge only on Windows now (on Linux the chat shakes inside the window).
+
 ## 0.5.1
 
 - Linux: a chat window opens visible at once instead of hidden and shown later. A hidden-then-shown webview was reported not to take clicks or keys.

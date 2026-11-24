@@ -444,6 +444,11 @@ async fn install_update(app: AppHandle, url: String) -> Result<(), String> {
 /// A nudge shakes the window the chat is in (the chat's own window, else the main one) side to side and back. The window is put back where it was.
 #[tauri::command]
 fn shake_chat(app: AppHandle, room_id: String) {
+    // Moving a window many times a second from another thread froze or crashed the app on Linux (GTK, and Wayland refuses window moves). It is only
+    // known to work on Windows; elsewhere the page shakes the chat instead.
+    if !cfg!(target_os = "windows") {
+        return;
+    }
     let id: String = room_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     let Some(w) = app.get_webview_window(&format!("chat-{id}")).or_else(|| app.get_webview_window(MAIN)) else { return };
     if !w.is_visible().unwrap_or(false) || w.is_minimized().unwrap_or(false) || w.is_maximized().unwrap_or(false) || w.is_fullscreen().unwrap_or(false) {
