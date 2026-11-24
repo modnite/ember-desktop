@@ -383,10 +383,21 @@ fn installer_for_this_os(assets: &[serde_json::Value]) -> Option<String> {
         .and_then(|a| a.get("browser_download_url").and_then(|u| u.as_str()).map(str::to_string))
 }
 
+/// Whether this app may move its own windows. Wayland does not allow it (the compositor places windows), unless the app runs through XWayland;
+/// there a nudge shakes the chat inside the window instead.
+fn window_moves() -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var("XDG_SESSION_TYPE").map(|t| t == "wayland").unwrap_or(false);
+    let forced_x11 = std::env::var("GDK_BACKEND").map(|b| b.starts_with("x11")).unwrap_or(false);
+    !wayland || forced_x11
+}
+
 /// What the About page shows about this app.
 #[tauri::command]
 fn app_info(app: AppHandle) -> serde_json::Value {
-    serde_json::json!({ "version": app.package_info().version.to_string(), "os": std::env::consts::OS, "arch": std::env::consts::ARCH })
+    serde_json::json!({ "version": app.package_info().version.to_string(), "os": std::env::consts::OS, "arch": std::env::consts::ARCH, "windowMoves": window_moves() })
 }
 
 /// Look for a newer Ember desktop on the project's GitHub releases.
@@ -444,9 +455,7 @@ async fn install_update(app: AppHandle, url: String) -> Result<(), String> {
 /// A nudge shakes the window the chat is in (the chat's own window, else the main one) side to side and back. The window is put back where it was.
 #[tauri::command]
 fn shake_chat(app: AppHandle, room_id: String) {
-    // Moving a window many times a second from another thread froze or crashed the app on Linux (GTK, and Wayland refuses window moves). It is only
-    // known to work on Windows; elsewhere the page shakes the chat instead.
-    if !cfg!(target_os = "windows") {
+    if !window_moves() {
         return;
     }
     let id: String = room_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();

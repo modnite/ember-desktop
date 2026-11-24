@@ -2,6 +2,10 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.5.3
+
+- A nudge moves the whole window again on Linux and Mac, as on Windows, wherever the system lets an app move its window. Wayland does not (unless the app runs through XWayland); there the chat shakes inside the window. 0.5.2 had switched it off outside Windows, but that was not what crashed the app.
+
 ## 0.5.2
 
 - Fixed on Linux: a nudge froze the chat window of the person who sent it and crashed the app of the person it was sent to. The whole window is moved for a nudge only on Windows now (on Linux the chat shakes inside the window).
