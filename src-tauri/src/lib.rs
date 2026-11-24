@@ -269,6 +269,7 @@ fn nav_guard(app: AppHandle) -> impl Fn(&Url) -> bool + Send + Sync + 'static {
         if is_local(url) || in_group || current.map(|c| same_origin(url, &c)).unwrap_or(false) || matches!(url.scheme(), "about" | "blob" | "data") {
             return true;
         }
+        eprintln!("[ember] a window tried to go to {url}, which is not the chosen server: opened in the browser instead");
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
         false
     }
@@ -461,6 +462,7 @@ fn shake_chat(app: AppHandle, room_id: String) {
 /// The page has drawn itself: show its window.
 #[tauri::command]
 fn window_ready(app: AppHandle, window: tauri::WebviewWindow) {
+    eprintln!("[ember] {} says its page is ready", window.label());
     reveal(&app, &window);
 }
 
@@ -560,7 +562,8 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
         .title(if title.trim().is_empty() { "Ember".to_string() } else { title })
         .inner_size(fit_size(&app, 460.0, 720.0).0, fit_size(&app, 460.0, 720.0).1)
         .min_inner_size(340.0, 400.0)
-        .visible(false)
+        // On Linux a chat window is made visible at once: a webview that is created hidden and shown later was reported not to take clicks or keys.
+        .visible(cfg!(target_os = "linux"))
         .on_navigation(nav_guard(app.clone()))
         .on_new_window(move |url, _features| {
             let _ = popup_app.opener().open_url(url.as_str(), None::<&str>);
@@ -574,6 +577,7 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
             let _ = window.set_position(PhysicalPosition::new(pos.x as f64 + step, pos.y as f64 + step));
         }
     }
+    eprintln!("[ember] chat window {} opened", window.label());
     show_when_ready(&app, &window);
     Ok(())
 }

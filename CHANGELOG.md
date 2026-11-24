@@ -2,6 +2,12 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.5.1
+
+- Linux: a chat window opens visible at once instead of hidden and shown later. A hidden-then-shown webview was reported not to take clicks or keys.
+- The page inside a chat window keeps asking for its chat (web 0.18.3), so it no longer sits on "This chat is not available".
+- Right click, Inspect works in every window, to see what a page reports when something misbehaves. The app also prints what it does with windows (run it from a terminal: `./Ember_0.5.1_amd64.AppImage`).
+
 ## 0.5.0
 
 - Updates come from this app's own releases. Settings, About Ember shows the app's version, the server's version, and looks for a newer app on GitHub. On Windows it downloads the installer and starts it (the app closes so it can be replaced); on Mac and Linux it opens the download. Only files from this project's releases are accepted.
