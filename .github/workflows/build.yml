@@ -1,12 +1,12 @@
 name: build
 
 # Builds the Ember desktop installers on Windows, macOS and Linux and attaches them to a release.
-# Run it from the Actions tab (or with `gh workflow run build.yml -f tag=v0.5.3`) once the release for that tag exists.
+# Run it from the Actions tab (or with `gh workflow run build.yml -f tag=v0.5.4`) once the release for that tag exists.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to attach the installers to (for example v0.5.3)
+        description: Release tag to attach the installers to (for example v0.5.4)
         required: true
 
 permissions:
@@ -44,7 +44,7 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-pulseaudio gstreamer1.0-nice gstreamer1.0-pipewire
       - run: npm install
       - run: npx tauri build ${{ matrix.args }}
       - name: Attach to the release

@@ -2,6 +2,11 @@
 
 Version numbers follow the other Ember apps: the last number for small fixes, the middle number for features and major fixes.
 
+## 0.5.4
+
+- Linux: sound, camera and microphone work. The AppImage did not carry GStreamer, the media framework the Linux webview uses for every sound, video and camera, so it fell back on whatever the system had (another version) or nothing: no nudge sound, no camera or microphone in calls, and a crash on the old mp3 nudge. The AppImage now carries its own GStreamer with the plugins for audio output (PulseAudio and PipeWire), cameras (V4L2 and PipeWire), WebRTC (libnice, DTLS, SRTP, Opus, VP8/VP9) and decoding.
+- Linux: the webview's camera and microphone capture and WebRTC are switched on (WebKitGTK leaves them off) and the server's requests for them are granted, as on Windows and Mac.
+
 ## 0.5.3
 
 - A nudge moves the whole window again on Linux and Mac, as on Windows, wherever the system lets an app move its window. Wayland does not (unless the app runs through XWayland); there the chat shakes inside the window. 0.5.2 had switched it off outside Windows, but that was not what crashed the app.

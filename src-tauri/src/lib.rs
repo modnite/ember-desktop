@@ -304,9 +304,41 @@ fn build_main(app: &AppHandle, server: Option<&str>, visible: bool) -> tauri::Re
             tauri::webview::NewWindowResponse::Deny
         })
         .build()?;
+    media_on(&window);
     show_when_ready(app, &window);
     Ok(window)
 }
+
+/// Linux: WebKitGTK ships with camera and microphone capture and WebRTC switched off, and with no answer to a page asking for them, which left calls
+/// with no camera or microphone. They are switched on for the person's own server, and its requests for camera, microphone, device names and
+/// notifications are granted, as the other systems do.
+#[cfg(target_os = "linux")]
+fn media_on(window: &WebviewWindow) {
+    let _ = window.with_webview(|wv| {
+        use webkit2gtk::glib::prelude::*;
+        use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+        let view = wv.inner();
+        if let Some(settings) = WebViewExt::settings(&view) {
+            settings.set_enable_media_stream(true);
+            settings.set_enable_mediasource(true);
+            settings.set_enable_webrtc(true);
+            settings.set_enable_webaudio(true);
+            settings.set_media_playback_requires_user_gesture(false);
+        }
+        view.connect_permission_request(|_, request| {
+            let ours = request.is::<webkit2gtk::UserMediaPermissionRequest>()
+                || request.is::<webkit2gtk::DeviceInfoPermissionRequest>()
+                || request.is::<webkit2gtk::NotificationPermissionRequest>();
+            if ours {
+                request.allow();
+            }
+            ours
+        });
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn media_on(_window: &WebviewWindow) {}
 
 /// Show a window that was made hidden if its page has not asked for that within a few seconds (a page that fails to load still needs to be seen).
 fn show_when_ready(app: &AppHandle, window: &WebviewWindow) {
@@ -592,6 +624,7 @@ async fn open_chat_window(app: AppHandle, room_id: String, title: String) -> Res
         }
     }
     eprintln!("[ember] chat window {} opened", window.label());
+    media_on(&window);
     show_when_ready(&app, &window);
     Ok(())
 }

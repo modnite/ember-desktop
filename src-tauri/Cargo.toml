@@ -1,6 +1,6 @@
 [package]
 name = "ember-desktop"
-version = "0.5.3"
+version = "0.5.4"
 description = "Ember for the desktop"
 edition = "2021"
 
@@ -20,3 +20,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls"] }
+
+# Linux: the webview itself (the same version Tauri uses), to switch on camera, microphone and WebRTC, which WebKitGTK leaves off.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
